@@ -98,6 +98,11 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         self.rollout_buffer = None
         self.mode_counter = 0
         self.metaworld_flag = metaworld_flag
+
+        if tensorboard_log == None:
+            print ("Tensorboard logger is none, quick hack to fix this")
+            tensorboard_log = "logs/PPO/"
+
         
         self.custom_logger = Logger(
             tensorboard_log,
@@ -280,6 +285,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                 logger.record("time/time_elapsed", int(time.time() - self.start_time), exclude="tensorboard")
                 logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
                 logger.dump(step=self.num_timesteps)
+
+                self.save("saved_models/PPO_walker_walk_" + str(iteration))
+                print ("done saving")
+
 
             self.train()
 

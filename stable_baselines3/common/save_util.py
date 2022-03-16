@@ -306,6 +306,8 @@ def save_to_zip_file(
     # data/params can be None, so do not
     # try to serialize them blindly
     if data is not None:
+        print ("removing saved custom logger...")
+        data.pop("custom_logger")
         serialized_data = data_to_json(data)
 
     # Create a zip-archive and write our objects there.

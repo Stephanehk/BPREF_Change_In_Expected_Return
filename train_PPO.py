@@ -2,6 +2,7 @@ import gym
 import argparse
 import yaml
 import os
+import torch
 
 from collections import OrderedDict
 from stable_baselines3 import PPO_CUSTOM
@@ -128,3 +129,9 @@ if __name__ == "__main__":
         yaml.dump(ordered_args, f)
     
     model.learn(total_timesteps=args.total_timesteps)
+    model.save("saved_models/PPO_walker_walk")
+
+    # import dill
+    # with open('saved_models/PPO_walker_walk.pkl', 'wb') as f:
+        # dill.dump(model, f)
+    # torch.save(model.get_parameters(), 'saved_models/PPO_walker_walk')
