@@ -84,11 +84,12 @@ def create_training_data(demonstrations, num_trajs, num_snippets, min_snippet_le
         #create random partial trajs by finding random start frame and random skip frame
         si = np.random.randint(6)
         sj = np.random.randint(6)
-        step = np.random.randint(3,7)
+        # step = np.random.randint(3,7)
+        step = 1 #removed frameskip
 
         traj_i = demonstrations[ti][0][si::step]  #slice(start,stop,step)
         traj_j = demonstrations[tj][0][sj::step]
-        traj_i_actions = demonstrations[ti][1][si::step] #skip everyother framestack to reduce size
+        traj_i_actions = demonstrations[ti][1][si::step] 
         traj_j_actions = demonstrations[tj][1][sj::step]
 
         if ti > tj:
@@ -126,10 +127,10 @@ def create_training_data(demonstrations, num_trajs, num_snippets, min_snippet_le
             tj_start = np.random.randint(min_length - rand_length + 1)
             #print(tj_start, len(demonstrations[ti]))
             ti_start = np.random.randint(tj_start, len(demonstrations[ti][0]) - rand_length + 1)
-        traj_i = demonstrations[ti][0][ti_start:ti_start+rand_length:1] #skip everyother framestack to reduce size
-        traj_j = demonstrations[tj][0][tj_start:tj_start+rand_length:1]
-        traj_i_actions = demonstrations[ti][1][ti_start:ti_start+rand_length:1] #skip everyother framestack to reduce size
-        traj_j_actions = demonstrations[tj][1][tj_start:tj_start+rand_length:1]
+        traj_i = demonstrations[ti][0][ti_start:ti_start+rand_length] #REMOVED THIS: skip everyother framestack to reduce size
+        traj_j = demonstrations[tj][0][tj_start:tj_start+rand_length]
+        traj_i_actions = demonstrations[ti][1][ti_start:ti_start+rand_length] #REMOVED THIS: skip everyother framestack to reduce size
+        traj_j_actions = demonstrations[tj][1][tj_start:tj_start+rand_length]
 
         max_traj_length = max(max_traj_length, len(traj_i), len(traj_j))
         if ti > tj:
@@ -159,6 +160,7 @@ class Net(nn.Module):
 
         intermediate_dimension = min(STATE_DIMS, max(12, ENCODING_DIMS*2))
         # intermediate_dimension = 12
+        # self.inital_layer = nn.Linear(STATE_DIMS, intermediate_dimension)
         self.fc1 = nn.Linear(STATE_DIMS, intermediate_dimension)
         self.fc_mu = nn.Linear(intermediate_dimension, ENCODING_DIMS)
         self.fc_var = nn.Linear(intermediate_dimension, ENCODING_DIMS)
@@ -191,7 +193,7 @@ class Net(nn.Module):
 
     def reparameterize(self, mu, var): #var is actually the log variance
         if self.training:
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
             # device = "cpu"
             std = var.mul(0.5).exp()
             eps = self.normal.sample(mu.shape).to(device)
@@ -214,7 +216,10 @@ class Net(nn.Module):
         # x = F.leaky_relu(self.conv3(x))
         # x = F.leaky_relu(self.conv4(x))
         # x = x.view(-1, 784)
+
+        # x = F.leaky_relu(self.inital_layer(x))
         x = F.leaky_relu(self.fc1(x))
+    
         mu = self.fc_mu(x)
         var = self.fc_var(x)
         z = self.reparameterize(mu, var)
@@ -227,6 +232,7 @@ class Net(nn.Module):
     def estimate_temporal_difference(self, z1, z2):
         #QUESTION: Not sure if what I did here with changed the cat dimension is correct
         pair = torch.cat((z1, z2), 2)
+        
         x = self.temporal_difference1(pair)
         #x = self.temporal_difference2(x)
         return x
@@ -281,7 +287,7 @@ def reconstruction_loss(decoded, target, mu, logvar):
 # Train the network
 def learn_reward(reward_network, optimizer, training_inputs, training_outputs, training_times, training_actions, num_iter, l1_reg, checkpoint_dir, loss_fn):
     #check if gpu available
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     # device = "cpu"
     # Assume that we are on a CUDA machine, then this should print a CUDA device:
     print(device)
@@ -336,8 +342,8 @@ def learn_reward(reward_network, optimizer, training_inputs, training_outputs, t
 
             est_dt_i = reward_network.estimate_temporal_difference(mu1[t1_i].unsqueeze(0), mu1[t2_i].unsqueeze(0))
             est_dt_j = reward_network.estimate_temporal_difference(mu2[t1_j].unsqueeze(0), mu2[t2_j].unsqueeze(0))
-            real_dt_i = (times_i[t2_i] - times_i[t1_i])/100.0
-            real_dt_j = (times_j[t2_j] - times_j[t1_j])/100.0
+            real_dt_i = (times_i[t2_i] - times_i[t1_i])/900.0
+            real_dt_j = (times_j[t2_j] - times_j[t1_j])/900.0
 
             actions_1 = reward_network.estimate_inverse_dynamics(mu1[0:-1], mu1[1:]).squeeze()
             actions_2 = reward_network.estimate_inverse_dynamics(mu2[0:-1], mu2[1:]).squeeze()
@@ -402,7 +408,7 @@ def learn_reward(reward_network, optimizer, training_inputs, training_outputs, t
             elif loss_fn == "trex+ss":
                 loss = dt_loss_i + dt_loss_j + (inverse_dynamics_loss_1 + inverse_dynamics_loss_2) + forward_dynamics_loss_1 + forward_dynamics_loss_2 + reconstruction_loss_1 + reconstruction_loss_2 + trex_loss
                 # loss = (inverse_dynamics_loss_1 + inverse_dynamics_loss_2) + forward_dynamics_loss_1 + forward_dynamics_loss_2 + trex_loss
-
+                
             last_losses.append([dt_loss_i, inverse_dynamics_loss_1, forward_dynamics_loss_1, reconstruction_loss_1, trex_loss])
 
             #*************************************************************************************************************************************
@@ -426,10 +432,10 @@ def learn_reward(reward_network, optimizer, training_inputs, training_outputs, t
 
 
     print("finished training")
-    np.save("last_losses.npy",last_losses)
+    np.save("last_losses_extra_layer.npy",last_losses)
 
 def calc_accuracy(reward_network, training_inputs, training_outputs):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     # device = "cpu"
     loss_criterion = nn.CrossEntropyLoss()
     num_correct = 0.
@@ -450,7 +456,7 @@ def calc_accuracy(reward_network, training_inputs, training_outputs):
     return num_correct / len(training_inputs)
 
 def predict_reward_sequence(net, traj):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     # device = "cpu"
     rewards_from_obs = []
     with torch.no_grad():
@@ -539,7 +545,7 @@ if __name__ == "__main__":
     loss_fn = "trex+ss"
     reward_model_path = "saved_models/walker_walk_rew_feature.params"
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     # device = "cpu"
     reward_net = Net(encoding_dims, ACTION_DIMS, STATE_DIMS)
     reward_net.to(device)
