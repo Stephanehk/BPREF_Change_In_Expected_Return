@@ -158,7 +158,8 @@ class Net(nn.Module):
         # self.conv3 = nn.Conv2d(32, 32, 3, stride=1)
         # self.conv4 = nn.Conv2d(32, 16, 3, stride=1)
 
-        intermediate_dimension = min(STATE_DIMS, max(12, ENCODING_DIMS*2))
+        intermediate_dimension = 32
+        #min(STATE_DIMS, max(12, ENCODING_DIMS*2))
         # intermediate_dimension = 12
         # self.inital_layer = nn.Linear(STATE_DIMS, intermediate_dimension)
         self.fc1 = nn.Linear(STATE_DIMS, intermediate_dimension)
@@ -196,9 +197,11 @@ class Net(nn.Module):
             device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
             # device = "cpu"
             std = var.mul(0.5).exp()
-            eps = self.normal.sample(mu.shape).to(device)
+            eps = torch.randn_like(std).to(device)
+            #self.normal.sample(mu.shape).to(device)
             return eps.mul(std).add(mu)
         else:
+            assert False
             return mu
 
 
@@ -209,15 +212,8 @@ class Net(nn.Module):
         sum_rewards = 0
         sum_abs_rewards = 0
         x = traj
-        # x = traj.permute(0,3,1,2) #get into NCHW format
-        #compute forward pass of reward network (we parallelize across frames so batch size is length of partial trajectory)
-        # x = F.leaky_relu(self.conv1(x))
-        # x = F.leaky_relu(self.conv2(x))
-        # x = F.leaky_relu(self.conv3(x))
-        # x = F.leaky_relu(self.conv4(x))
-        # x = x.view(-1, 784)
-
-        # x = F.leaky_relu(self.inital_layer(x))
+    
+        x = self.sigmoid(x)
         x = F.leaky_relu(self.fc1(x))
     
         mu = self.fc_mu(x)
@@ -255,10 +251,7 @@ class Net(nn.Module):
 
     def decode(self, encoding):
         x = F.leaky_relu(self.reconstruct1(encoding))
-        # x = F.leaky_relu(self.reconstruct2(x))
-        x = self.sigmoid(self.reconstruct2(x))
-
-        # return self.sigmoid(x)
+        x = F.leaky_relu(self.reconstruct2(x))
         return x
 
     def forward(self, traj_i, traj_j):
@@ -271,18 +264,20 @@ class Net(nn.Module):
 
 def reconstruction_loss(decoded, target, mu, logvar):
     num_elements = decoded.numel()
-    target_num_elements = decoded.numel()
+    target_num_elements = target.numel()
     if num_elements != target_num_elements:
         print("ELEMENT SIZE MISMATCH IN RECONSTRUCTION")
         sys.exit()
         
-    bce = F.binary_cross_entropy(decoded, target)
-    # bce = F.mse_loss(decoded, target)
+    # bce = F.binary_cross_entropy(decoded, target)
+    target = torch.sigmoid(target)
+    bce = F.mse_loss(decoded, target)
 
     kld = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+
     kld /= num_elements
     # print("bce: " + str(bce) + " kld: " + str(kld))
-    return bce + kld
+    return bce + kld, bce, kld
 
 # Train the network
 def learn_reward(reward_network, optimizer, training_inputs, training_outputs, training_times, training_actions, num_iter, l1_reg, checkpoint_dir, loss_fn):
@@ -330,10 +325,16 @@ def learn_reward(reward_network, optimizer, training_inputs, training_outputs, t
             decoded1 = reward_network.decode(z1)
             decoded2 = reward_network.decode(z2)
 
-            reconstruction_loss_1 = 10*reconstruction_loss(decoded1.float(), traj_i.float(), mu1.float(), logvar1.float())
-            reconstruction_loss_2 = 10*reconstruction_loss(decoded2.float(), traj_j.float(), mu2.float(), logvar2.float())
+            # # print (decoded1)
+            # # print (traj_i)
+            # # print ("\n")
 
-            #*************************************************************************************************************************************
+            reconstruction_loss_1, bce1, kld1 = reconstruction_loss(decoded1.float(), traj_i.float(), mu1.float(), logvar1.float())
+            reconstruction_loss_2, bce2, kld2 = reconstruction_loss(decoded2.float(), traj_j.float(), mu2.float(), logvar2.float())
+
+            reconstruction_loss_1*=10
+            reconstruction_loss_2*=10
+            # *************************************************************************************************************************************
             # ==============================================================================================================================
             t1_i = np.random.randint(0, len(times_i))
             t2_i = np.random.randint(0, len(times_i))
@@ -394,12 +395,12 @@ def learn_reward(reward_network, optimizer, training_inputs, training_outputs, t
             trex_loss = loss_criterion(outputs, labels)
             #===============================================================================================================================================================================
 
-            # print (dt_loss_i)
-            # print (inverse_dynamics_loss_1)
-            # print (forward_dynamics_loss_1)
-            # print (reconstruction_loss_1)
-            # print (trex_loss)
-            # print ("\n")
+            # # print (dt_loss_i)
+            # # print (inverse_dynamics_loss_1)
+            # # print (forward_dynamics_loss_1)
+            # # print (reconstruction_loss_1)
+            # # print (trex_loss)
+            # # print ("\n")
 
             if loss_fn == "trex": #only use trex loss
                 loss = trex_loss
@@ -407,9 +408,11 @@ def learn_reward(reward_network, optimizer, training_inputs, training_outputs, t
                 loss = dt_loss_i + dt_loss_j + (inverse_dynamics_loss_1 + inverse_dynamics_loss_2) + forward_dynamics_loss_1 + forward_dynamics_loss_2 + reconstruction_loss_1 + reconstruction_loss_2
             elif loss_fn == "trex+ss":
                 loss = dt_loss_i + dt_loss_j + (inverse_dynamics_loss_1 + inverse_dynamics_loss_2) + forward_dynamics_loss_1 + forward_dynamics_loss_2 + reconstruction_loss_1 + reconstruction_loss_2 + trex_loss
-                # loss = (inverse_dynamics_loss_1 + inverse_dynamics_loss_2) + forward_dynamics_loss_1 + forward_dynamics_loss_2 + trex_loss
-                
-            last_losses.append([dt_loss_i, inverse_dynamics_loss_1, forward_dynamics_loss_1, reconstruction_loss_1, trex_loss])
+                # loss = reconstruction_loss_1 + reconstruction_loss_2
+
+
+            # last_losses.append([reconstruction_loss_1, reconstruction_loss_2, bce1, bce2, kld1, kld2])
+            last_losses.append([dt_loss_i + dt_loss_j, inverse_dynamics_loss_1 + inverse_dynamics_loss_2, forward_dynamics_loss_1 + forward_dynamics_loss_2,reconstruction_loss_1 + reconstruction_loss_2, kld1 + kld2, trex_loss])
 
             #*************************************************************************************************************************************
 
@@ -432,7 +435,7 @@ def learn_reward(reward_network, optimizer, training_inputs, training_outputs, t
 
 
     print("finished training")
-    np.save("last_losses_extra_layer.npy",last_losses)
+    np.save("last_losses_autoencoder_components_playing.npy",last_losses)
 
 def calc_accuracy(reward_network, training_inputs, training_outputs):
     device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
@@ -485,6 +488,7 @@ if __name__ == "__main__":
         seed=args.seed)
 
     if args.normalize == 1:
+        print ("Normalizing env")
         env = VecNormalize(env, norm_reward=False)
 
     # print (env.action_space)
@@ -536,7 +540,7 @@ if __name__ == "__main__":
     # # Now we create a reward network and optimize it using the training data.
 
     # #QUESTION: Any suggestion for choosing this parameter?
-    encoding_dims = 12
+    encoding_dims = 100
     lr = 0.0001
     weight_decay = 0.001
     num_iter = 2
@@ -556,7 +560,7 @@ if __name__ == "__main__":
     
     learn_reward(reward_net, optimizer, training_obs, training_labels, training_times, training_actions, num_iter, l1_reg, reward_model_path, loss_fn)
     #save reward network
-    torch.save(reward_net.state_dict(), "saved_models/walker_walk_rew_feature_state_dict")
+    torch.save(reward_net.state_dict(), "saved_models/walker_walk_rew_feature_state_dict_" + str(encoding_dims))
 
     #print out predicted cumulative returns and actual returns
     with torch.no_grad():

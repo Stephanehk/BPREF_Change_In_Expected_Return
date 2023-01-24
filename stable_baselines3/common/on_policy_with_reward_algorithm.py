@@ -359,7 +359,7 @@ class OnPolicyRewardAlgorithm(BaseAlgorithm):
             
             obsact = np.concatenate((self._last_obs, clipped_actions), axis=-1) # num_env x (obs+act)
             obsact = np.expand_dims(obsact, axis=1) # num_env x 1 x (obs+act) 
-            
+           
             obs_origin = env.get_original_obs()
             replay_buffer.add_obs(obs_origin)
             state_entropy = replay_buffer.compute_state_entropy(obs_origin)

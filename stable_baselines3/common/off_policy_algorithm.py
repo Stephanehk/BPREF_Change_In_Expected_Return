@@ -240,6 +240,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         reset_num_timesteps: bool = True,
     ) -> "OffPolicyAlgorithm":
 
+        # print ("On training end")
+
         total_timesteps, callback = self._setup_learn(
             total_timesteps, eval_env, callback, eval_freq, n_eval_episodes, eval_log_path, reset_num_timesteps, tb_log_name
         )
@@ -269,6 +271,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
 
         callback.on_training_end()
+        
+        # self.save("saved_models/SAC_walker_walk_model")
 
         return self
 

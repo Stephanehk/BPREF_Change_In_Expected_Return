@@ -102,13 +102,13 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         if tensorboard_log == None:
             print ("Tensorboard logger is none, quick hack to fix this")
             tensorboard_log = "logs/PPO/"
-
-        
-        self.custom_logger = Logger(
-            tensorboard_log,
-            save_tb=False,
-            log_frequency=10000,
-            agent='ppo')
+            self.custom_logger = None
+        else:
+            self.custom_logger = Logger(
+                tensorboard_log,
+                save_tb=False,
+                log_frequency=10000,
+                agent='ppo')
 
         if _init_setup_model:
             self._setup_model()
@@ -192,11 +192,12 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                             if self.metaworld_flag:
                                 ep_success.append(maybe_ep_info["s"])
 
-                    self.custom_logger.log('eval/episode_reward', np.mean(ep_reward), self.num_timesteps)
-                    self.custom_logger.log('eval/true_episode_reward', np.mean(ep_reward), self.num_timesteps)
-                    if self.metaworld_flag:
-                        self.custom_logger.log('eval/true_episode_success', np.mean(ep_success), self.num_timesteps)
-                    self.custom_logger.dump(self.num_timesteps)
+                    if self.custom_logger is not None:
+                        self.custom_logger.log('eval/episode_reward', np.mean(ep_reward), self.num_timesteps)
+                        self.custom_logger.log('eval/true_episode_reward', np.mean(ep_reward), self.num_timesteps)
+                        if self.metaworld_flag:
+                            self.custom_logger.log('eval/true_episode_success', np.mean(ep_success), self.num_timesteps)
+                        self.custom_logger.dump(self.num_timesteps)
                     
             # Give access to local variables
             callback.update_locals(locals())
@@ -267,20 +268,21 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                 if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
                     logger.record("rollout/ep_rew_mean", safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
                     logger.record("rollout/ep_len_mean", safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
-                    self.custom_logger.log('train/episode_reward', 
-                        safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]), 
-                        self.num_timesteps)
-                    
-                    self.custom_logger.log('train/true_episode_reward', 
-                        safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]), 
-                        self.num_timesteps)
-                    
-                    if self.metaworld_flag:
-                        logger.record("rollout/ep_success_mean", safe_mean([ep_info["s"] for ep_info in self.ep_info_buffer]))
-                        self.custom_logger.log('train/true_episode_success', 
-                            safe_mean([ep_info["s"] for ep_info in self.ep_info_buffer]), 
+                    if self.custom_logger is not None:
+                        self.custom_logger.log('train/episode_reward', 
+                            safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]), 
                             self.num_timesteps)
-                    self.custom_logger.dump(self.num_timesteps)
+                        
+                        self.custom_logger.log('train/true_episode_reward', 
+                            safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]), 
+                            self.num_timesteps)
+                        
+                        if self.metaworld_flag:
+                            logger.record("rollout/ep_success_mean", safe_mean([ep_info["s"] for ep_info in self.ep_info_buffer]))
+                            self.custom_logger.log('train/true_episode_success', 
+                                safe_mean([ep_info["s"] for ep_info in self.ep_info_buffer]), 
+                                self.num_timesteps)
+                        self.custom_logger.dump(self.num_timesteps)
                 logger.record("time/fps", fps)
                 logger.record("time/time_elapsed", int(time.time() - self.start_time), exclude="tensorboard")
                 logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")

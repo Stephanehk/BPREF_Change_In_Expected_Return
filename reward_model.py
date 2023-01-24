@@ -12,8 +12,31 @@ import os
 import time
 
 from scipy.stats import norm
+from StrippedNet import EmbeddingNet
+from agent.critic import DoubleQCritic
+from agent.actor import DiagGaussianActor
 
 device = 'cuda'
+class gt_VF():
+    def __init__(self, obs_dim,action_dim):
+        model_dir = "/home/stephane/Desktop/BPref/exp/walker_walk/H1024_L2_B1024_tau0.005/sac_unsup0_topk5_sac_lr0.0005_temp0.1_seed12345/"
+        step = 1000000
+        self.critic = DoubleQCritic(obs_dim=obs_dim,action_dim=action_dim, hidden_dim=1024, hidden_depth=2)
+        self.critic.load_state_dict(torch.load('%s/critic_target_%s.pt' % (model_dir, step)))
+
+        self.actor = DiagGaussianActor(obs_dim=obs_dim,action_dim=action_dim, hidden_dim=1024, hidden_depth=2,log_std_bounds=[-5, 2])
+        self.actor.load_state_dict(torch.load('%s/actor_%s.pt' % (model_dir, step)))
+
+    def V(self,obs,sample=False):
+        obs = torch.FloatTensor(obs).to(self.device)
+        obs = obs.unsqueeze(0)
+        dist = self.actor(obs)
+        action = dist.sample() if sample else dist.mean
+        action = action.clamp(*self.action_range)
+        assert action.ndim == 2 and action.shape[0] == 1
+
+        Q1, Q2 = self.critic(obs, action)
+        return torch.min(Q1,Q2)
 
 def gen_net(in_size=1, out_size=1, H=128, n_layers=3, activation='tanh'):
     net = []
@@ -89,7 +112,11 @@ class RewardModel:
                  teacher_beta=-1, teacher_gamma=1, 
                  teacher_eps_mistake=0, 
                  teacher_eps_skip=0, 
-                 teacher_eps_equal=0):
+                 teacher_eps_equal=0,
+                 state_dims = 24,
+                 encoding_dims = 12,
+                 pretrained_network = "",
+                 model_type = "ORIG_PR"):
         
         # train data is trajectories, must process to sa and s..   
         self.ds = ds
@@ -138,6 +165,29 @@ class RewardModel:
         
         self.label_margin = label_margin
         self.label_target = 1 - 2*self.label_margin
+        
+    
+        self.model_type = model_type
+        #"SF_PR"
+
+        if self.model_type == "SF_PR" or self.model_type == "SF_CER" or self.model_type == "SF_PR_test" or self.model_type == "SF_PR_24" or self.model_type == "SF_PR_48" or self.model_type == "SF_PR_100":
+            self.de = 1
+            self.reward_net = EmbeddingNet(state_dims, encoding_dims)
+            self.reward_net.load_state_dict(torch.load(pretrained_network, map_location=device))
+            num_features = self.reward_net.fc2.in_features
+            print("reward is linear combination of ", num_features, "features")
+            self.reward_net.fc2 = nn.Linear(num_features, 1, bias=False) #last layer just outputs the scalar reward = w^T \phi(s)
+            self.reward_net.to(device)
+            #freeze all weights so there are no gradients
+            for name, param in self.reward_net.named_parameters():
+                if name != "fc2.weight":
+                    param.requires_grad = False
+            self.opt = torch.optim.Adam(self.reward_net.parameters(), lr = self.lr)
+        if self.model_type == "SF_CER":
+            #load SAC model
+            gt_vf = gt_VF(self.ds,self.da)
+
+
     
     def softXEnt_loss(self, input, target):
         logprobs = torch.nn.functional.log_softmax (input, dim = 1)
@@ -166,10 +216,12 @@ class RewardModel:
         self.opt = torch.optim.Adam(self.paramlst, lr = self.lr)
             
     def add_data(self, obs, act, rew, done):
+        
         sa_t = np.concatenate([obs, act], axis=-1)
         r_t = rew
         
         flat_input = sa_t.reshape(1, self.da+self.ds)
+
         r_t = np.array(r_t)
         flat_target = r_t.reshape(1, 1)
 
@@ -244,7 +296,20 @@ class RewardModel:
 
     def r_hat_member(self, x, member=-1):
         # the network parameterizes r hat in eqn 1 from the paper
-        return self.ensemble[member](torch.from_numpy(x).float().to(device))
+        if self.model_type == "SF_PR" or self.model_type == "SF_PR_test" or self.model_type == "SF_PR_24" or self.model_type == "SF_PR_48" or self.model_type == "SF_PR_100":
+            #x should be a sequence of states
+        
+            #TODO: NOT QUITE SURE IF OUTPUT VECTOR IS RECONSTRUCTED PROPERLY
+            x = torch.from_numpy(x).float().to(device)
+            orig_shape = x.shape
+            x = torch.reshape(x,(orig_shape[0]*orig_shape[1],orig_shape[2]))
+            x = x[:,:24] #remove actions 
+            batch_rewards = self.reward_net.get_rewards(x)
+            batch_rewards = torch.reshape(batch_rewards, (orig_shape[0],orig_shape[1],1))
+            return batch_rewards
+        else:
+            return self.ensemble[member](torch.from_numpy(x).float().to(device))
+
 
     def r_hat(self, x):
         # they say they average the rewards from each member of the ensemble, but I think this only makes sense if the rewards are already normalized
@@ -266,16 +331,27 @@ class RewardModel:
         return np.mean(r_hats, axis=0)
     
     def save(self, model_dir, step):
-        for member in range(self.de):
+        if self.model_type == "SF_PR" or self.model_type == "SF_PR_test" or self.model_type == "SF_PR_24" or self.model_type == "SF_PR_48" or self.model_type == "SF_PR_100":
             torch.save(
-                self.ensemble[member].state_dict(), '%s/reward_model_%s_%s.pt' % (model_dir, step, member)
-            )
+                    self.reward_net.state_dict(), '%s/SF_reward_model_%s_%s.pt' % (model_dir, step, 0)
+                )
+        else:
+            for member in range(self.de):
+                torch.save(
+                    self.ensemble[member].state_dict(), '%s/reward_model_%s_%s.pt' % (model_dir, step, member)
+                )
             
     def load(self, model_dir, step):
-        for member in range(self.de):
-            self.ensemble[member].load_state_dict(
-                torch.load('%s/reward_model_%s_%s.pt' % (model_dir, step, member))
-            )
+        if self.model_type == "SF_PR" or self.model_type == "SF_PR_test" or self.model_type == "SF_PR_24" or self.model_type == "SF_PR_48" or self.model_type == "SF_PR_100":
+            for member in range(self.de):
+                self.reward_net.load_state_dict(
+                    torch.load('%s/SF_reward_model_%s_%s.pt' % (model_dir, step, member))
+                )
+        else:
+            for member in range(self.de):
+                self.ensemble[member].load_state_dict(
+                    torch.load('%s/reward_model_%s_%s.pt' % (model_dir, step, member))
+                )
     
     def get_train_acc(self):
         ensemble_acc = np.array([0 for _ in range(self.de)])
@@ -650,6 +726,11 @@ class RewardModel:
                 
             loss.backward()
             self.opt.step()
+
+
+            # for name, param in self.reward_net.named_parameters():
+            #     if name == "fc_mu.weight":
+            #         print (param)
         
         ensemble_acc = ensemble_acc / total
         
@@ -684,11 +765,11 @@ class RewardModel:
                 sa_t_2 = self.buffer_seg2[idxs]
                 labels = self.buffer_label[idxs]
                 labels = torch.from_numpy(labels.flatten()).long().to(device)
-                
                 if member == 0:
                     total += labels.size(0)
                 
                 # get logits
+                
                 r_hat1 = self.r_hat_member(sa_t_1, member=member)
                 r_hat2 = self.r_hat_member(sa_t_2, member=member)
                 r_hat1 = r_hat1.sum(axis=1)

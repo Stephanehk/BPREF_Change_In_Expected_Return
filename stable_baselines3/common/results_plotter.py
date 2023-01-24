@@ -13,7 +13,7 @@ X_TIMESTEPS = "timesteps"
 X_EPISODES = "episodes"
 X_WALLTIME = "walltime_hrs"
 POSSIBLE_X_AXES = [X_TIMESTEPS, X_EPISODES, X_WALLTIME]
-EPISODES_WINDOW = 100
+EPISODES_WINDOW = 50
 
 
 def rolling_window(array: np.ndarray, window: int) -> np.ndarray:
@@ -85,17 +85,21 @@ def plot_curves(
     max_x = max(xy[0][-1] for xy in xy_list)
     min_x = 0
     for (i, (x, y)) in enumerate(xy_list):
-        plt.scatter(x, y, s=2)
+        # plt.scatter(x, y, s=2)
         # Do not plot the smoothed curve at all if the timeseries is shorter than window size.
         if x.shape[0] >= EPISODES_WINDOW:
             # Compute and plot rolling mean with window of size EPISODE_WINDOW
             x, y_mean = window_func(x, y, EPISODES_WINDOW, np.mean)
+            y_std = np.std(y)
+            plt.fill_between(x, y_mean-y_std, y_mean+y_std, alpha=0.3)
             plt.plot(x, y_mean)
+
     plt.xlim(min_x, max_x)
     plt.title(title)
     plt.xlabel(x_axis)
     plt.ylabel("Episode Rewards")
     plt.tight_layout()
+    plt.savefig("/home/stephane/Desktop/BPref/saved_figures/" + title + ".png")
 
 
 def plot_results(
@@ -119,4 +123,7 @@ def plot_results(
             data_frame = data_frame[data_frame.l.cumsum() <= num_timesteps]
         data_frames.append(data_frame)
     xy_list = [ts2xy(data_frame, x_axis) for data_frame in data_frames]
+    # for trial in xy_list:
+    #     x,y = trial
+    #     print (np.mean(y))
     plot_curves(xy_list, x_axis, task_name, figsize)

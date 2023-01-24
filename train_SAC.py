@@ -45,6 +45,8 @@ class Workspace(object):
             float(self.env.action_space.high.max())
         ]
         self.agent = hydra.utils.instantiate(cfg.agent)
+        # self.agent.load("/home/stephane/Desktop/BPref/exp/walker_walk/H1024_L2_B1024_tau0.005/sac_unsup0_topk5_sac_lr0.0005_temp0.1_seed12345",3)
+
         
         # no relabel
         self.replay_buffer = ReplayBuffer(
@@ -54,6 +56,30 @@ class Workspace(object):
             self.device)
         meta_file = os.path.join(self.work_dir, 'metadata.pkl')
         pkl.dump({'cfg': self.cfg}, open(meta_file, "wb"))
+
+
+        #TODO: UNCOMMENT TO GET DIFF REWARD FUNCTION WORKING
+        # ENCODING_DIMS = 12
+        #STATE_DIMS = 24
+        #pretrained_network = "saved_models/walker_walk_pretrained_12.params"
+        # self.reward_net = EmbeddingNet(STATE_DIMS, ENCODING_DIMS)
+        # self.reward_net.load_state_dict(torch.load(pretrained_network, map_location=device))
+        # num_features = self.reward_net.fc2.in_features
+        # print("reward is linear combination of ", num_features, "features")
+        # self.reward_net.fc2 = nn.Linear(num_features, 1, bias=False) #last layer just outputs the scalar reward = w^T \phi(s)
+        # self.reward_net.to(device)
+        # #freeze all weights so there are no gradients (we'll manually update the last layer via proposals so no grads required)
+        # for name, param in self.reward_net.named_parameters():
+        #     param.requires_grad = False
+        # self.reward_net.apply(weights_init_uniform_rule)
+    
+    def weights_init_uniform(self, m):
+        classname = m.__class__.__name__
+        # for every Linear layer in a model..
+        if classname.find('Linear') != -1:
+            # apply a uniform distribution to the weights and a bias=0
+            m.weight.data.uniform_(-1.0, 1.0)
+            # m.bias.data.fill_(0)
 
     def evaluate(self):
         average_episode_reward = 0
@@ -159,7 +185,9 @@ class Workspace(object):
                                             gradient_update=1, K=self.cfg.topK)
             
             
-            next_obs, reward, done, extra = self.env.step(action)      
+            next_obs, reward, done, extra = self.env.step(action)
+            #TODO: UNCOMMENT TO GET DIFF REWARD FUNCTION WORKING
+            #reward = self.reward_net.cum_return(next_obs)      
             # allow infinite bootstrap
             done = float(done)
             done_no_max = 0 if episode_step + 1 == self.env._max_episode_steps else done
@@ -176,7 +204,9 @@ class Workspace(object):
             obs = next_obs
             episode_step += 1
             self.step += 1
-
+        # self.agent.save("saved_models/SAC_walker_walk_model",self.step)
+        print ("Saved to:")
+        print (self.work_dir)
         self.agent.save(self.work_dir, self.step)
         
 @hydra.main(config_path='config/train.yaml', strict=True)

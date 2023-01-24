@@ -67,6 +67,12 @@ if __name__ == "__main__":
     parser.add_argument("--teacher-eps-mistake", type=float, default=0.0)
     parser.add_argument("--teacher-eps-skip", type=float, default=0.0)
     parser.add_argument("--teacher-eps-equal", type=float, default=0.0)
+
+    parser.add_argument("--state_dims", type=int, default=24)
+    parser.add_argument("--encoding_dims", type=int, default=12)
+    parser.add_argument("--pretrained_network", type=str, default="")
+    parser.add_argument("--model_type", type=str, default="ORIG_PR")
+
     args = parser.parse_args()
     
     metaworld_flag = False
@@ -111,6 +117,7 @@ if __name__ == "__main__":
     args.tensorboard_log += '_unsuper_' + str(args.unsuper_step)
     args.tensorboard_log += '_update_' + str(args.unsuper_n_epochs)
     args.tensorboard_log += '_seed_' + str(args.seed) 
+    args.tensorboard_log += '_model_type_' + str(args.model_type) 
     
     # extra params
     if args.use_sde == 0:
@@ -147,7 +154,11 @@ if __name__ == "__main__":
         teacher_eps_mistake=args.teacher_eps_mistake,
         teacher_eps_skip=args.teacher_eps_skip, 
         teacher_eps_equal=args.teacher_eps_equal,
-        large_batch=args.re_large_batch)
+        large_batch=args.re_large_batch,
+        state_dims = args.state_dims,
+        encoding_dims = args.encoding_dims,
+        pretrained_network = args.pretrained_network,
+        model_type = args.model_type)
     
     if args.normalize == 1:
         env = VecNormalize(env, norm_reward=False)
